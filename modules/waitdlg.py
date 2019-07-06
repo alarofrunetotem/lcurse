@@ -1,7 +1,7 @@
 from PyQt5 import Qt
 from bs4 import BeautifulSoup
 import urllib.parse
-from urllib.request import build_opener, HTTPCookieProcessor, HTTPError
+from urllib.request import build_opener, HTTPCookieProcessor, HTTPError, HTTPRedirectHandler
 from http import cookiejar
 import zipfile
 from modules import defines
@@ -15,26 +15,26 @@ from subprocess import check_output, check_call
 import hashlib
 import json
 
-opener = build_opener(HTTPCookieProcessor(cookiejar.CookieJar()))
+opener = build_opener(HTTPCookieProcessor(cookiejar.CookieJar()),HTTPRedirectHandler)
 
 # default User-Agent ('Python-urllib/2.6') will *not* work
 opener.addheaders = [('User-Agent', 'Mozilla/5.0'), ]
 
-# Debug helper: caches html page to not hammer server while testing/debugging/coding    
+# Debug helper: caches html page to not hammer server while testing/debugging/coding
 class CachedResponse:
     data = ""
     def __init__(self,data):
         self.data=data
-        
+
     def read(self):
         return self.data
 
-# Debug helper: caches html page to not hammer server while testing/debugging/coding    
+# Debug helper: caches html page to not hammer server while testing/debugging/coding
 class CacheDecorator(object):
     cachePrefix = '/tmp/urlcache_'
     def __init__(self,fun):
         self.fun=fun
-        
+
     def __call__(self, url):
         md5 = hashlib.md5()
         md5.update(bytes(url,'utf8'))
@@ -46,9 +46,9 @@ class CacheDecorator(object):
             f = open(self.cachePrefix +  hash, "w")
             f.write(str(response.read()))
             f.close()
-            return response            
-            
-    def ReadFromCache(self, hash): 
+            return response
+
+    def ReadFromCache(self, hash):
         return CachedResponse(open(self.cachePrefix + hash,'r').read())
 
 # Enable CacheDecorator in order to cache html pages retrieved from curse
@@ -57,12 +57,12 @@ class CacheDecorator(object):
 def OpenWithRetry(url):
     count = 0
     maxcount = 5
-    
+    print("URL: {}".format(url))
     # Retry 5 times
     while count < maxcount:
         try:
             response = opener.open(urllib.parse.urlparse(urllib.parse.quote(url, ':/?=')).geturl())
-
+            print(response)
             return response
 
         except Exception as e:
@@ -189,22 +189,28 @@ class CheckWorker(Qt.QThread):
             html = response.read()
             soup = BeautifulSoup(html, "lxml")
             beta=self.addon[4]
-            lis = soup.findAll("tr","project-file-list__item")
+            tb = soup.find("table","project-file-listing")
+            lis = tb.findAll("tr")
             if lis:
-                versionIdx = 0
+                versionIdx = 1
                 isOk=False
                 while True:
-                    isOk= beta or lis[versionIdx].td.span.attrs['title']=='Release'
+                    versione = lis[versionIdx].td.div.span.string
+                    isOk= beta or versione=="R"
                     if isOk:
                         break
                     versionIdx=versionIdx+1
                 row=lis[versionIdx]
-                version=row.find("span","table__content file__name").string
+                elem = row.find("a",attrs={"data-action":"file-link"})
+                version = elem.string
                 if str(self.addon[3]) != version:
-                    downloadLink="https://www.curseforge.com"+ row.find("a").attrs['href'] + '/file'
+                    addonid = elem.attrs['href'].split('/')[-1]
+                    addonname = elem.attrs['href'].split('/')[-3]
+                    downloadLink = "https://www.curseforge.com/wow/addons/" + addonname + "/download/" + addonid + "/file"
+                    print("link",downloadLink)
                     return (True, (version, downloadLink))
             return (False, ("", ""))
-            
+
         except HTTPError as e:
             print("Curse Update Exception",e)
         except Exception as e:
@@ -308,7 +314,7 @@ class UpdateWorker(Qt.QThread):
                         break
                 toc="{}/Interface/AddOns/{}".format(settings.value(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT),nome)
                 z.extractall(dest)
-            os.remove(filename)
+#            os.remove(filename)
             return True,toc
         except Exception as e:
             print("DoCurseUpdate",e)
