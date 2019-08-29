@@ -53,7 +53,7 @@ class CacheDecorator(object):
 
 # Enable CacheDecorator in order to cache html pages retrieved from curse
 # WARNING only for html parsing, disable when you are testing downloading zips
-#@CacheDecorator
+# @CacheDecorator
 def OpenWithRetry(url):
     count = 0
     maxcount = 5
@@ -391,20 +391,21 @@ class UpdateCatalogWorker(Qt.QThread):
 
         lastpage = 1
         if page == 1:
-            pager = soup.select("ul.b-pagination-list.paging-list.j-tablesorter-pager.j-listing-pagination li")
+            pager = soup.select(".pagination-item span")
             if pager:
-                lastpage = int(pager[len(pager) - 2].contents[0].contents[0])
-
-        projects = soup.select("li.project-list-item")  # li .title h4 a")
+#                lastpage = int(pager[len(pager) - 2].contents[0].contents[0])
+                lastpage = int(pager[len(pager) - 1].contents[0])
+        projects = soup.select("div.project-listing-row")  #"li.project-list-item")  # li .title h4 a")
         self.addonsMutex.lock()
         for project in projects:
-            links=project.select("a.button--download")
-            texts=project.select("a h2")
+            links=project.select("a.button--hollow")
+            texts=project.select("a h3")
             for text in texts:
                 nome=text.string.replace('\\r','').replace('\\n','').strip()
                 break
             for link in links:
                 href=link.get("href").replace("/download",'')
+                break
             self.addons.append([nome, "http://www.curseforge.com{}".format(href)])
         self.progress.emit(len(self.addons))
         self.addonsMutex.unlock()
