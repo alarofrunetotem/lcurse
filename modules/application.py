@@ -197,15 +197,15 @@ class MainWidget(Qt.QMainWindow):
         screen = Qt.QDesktopWidget().screenGeometry()
         size = self.geometry()
         self.move((screen.width() - size.width()) / 2, (screen.height() - size.height()) / 5)
-        self.setWindowTitle('WoW!Curse ' + '(TOC: ' + defines.TOC +')')
+        self.setWindowTitle('WoW!Curse 2.0 ' + '(TOC: ' + defines.TOC +')')
 
         box.addWidget(self.addonList)
         self.statusBar().showMessage(self.tr("Ready"))
         self.setCentralWidget(self.mainWidget)
         self.show()
 
-    #	def resizeEvent(self, event):
-    #		print(self.geometry())
+    #    def resizeEvent(self, event):
+    #        print(self.geometry())
 
     def ensureLCurseFolder(self):
         if not os.path.exists(defines.LCURSE_FOLDER):
