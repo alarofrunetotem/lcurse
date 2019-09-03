@@ -13,7 +13,7 @@ LCURSE_MAXTHREADS_KEY = "Preferences/maxthreads"
 LCURSE_MAXTHREADS_DEFAULT = 50
 LCURSE_DBVERSION = 1
 TOC = "70100"
-print("Folders",WOW_FOLDER_KEY,WOW_FOLDER_DEFAULT)
+print("Folders",WOW_FOLDER_KEY,WOW_FOLDER_DEFAULT,LCURSE_FOLDER)
 # with open(toc, encoding="utf8", errors='replace') as f:
 #     line = f.readline()
 #     while line != "":
