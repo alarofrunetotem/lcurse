@@ -28,8 +28,6 @@ def loadTranslators():
         apptranslator = Qt.QTranslator()
         apptranslator.load(appTranslationFile)
         translations.append(apptranslator)
-    else:
-        print("WARNING: gui translation file could not be found: {}".format(appTranslationFile))
 
     for translator in translations:
         app.installTranslator(translator)
@@ -37,7 +35,7 @@ def loadTranslators():
 
 if __name__ == "__main__":
     Qt.QCoreApplication.setApplicationName("lcurse")
-    Qt.QCoreApplication.setOrganizationName("None-Inc.")
+    Qt.QCoreApplication.setOrganizationName("AlarOfRunetotem")
     app = Qt.QApplication(sys.argv)
     loadTranslators()
 
