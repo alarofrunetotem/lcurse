@@ -6,9 +6,7 @@ class PreferencesDlg(Qt.QDialog):
     def __init__(self, parent):
         super(PreferencesDlg, self).__init__(parent)
         self.settings = Qt.QSettings()
-
-        print(defines)
-
+        self.prefix=self.settings.value(defines.WOW_VERSION_KEY)
         layout = Qt.QVBoxLayout(self)
 
         layout.addWidget(Qt.QLabel(self.tr("WoW Install Folder:"), self))
@@ -66,19 +64,23 @@ class PreferencesDlg(Qt.QDialog):
         return self.settings.setValue(defines.LCURSE_MAXTHREADS_KEY, int(newMaxThreads))
 
     def getWowFolder(self):
-        return self.settings.value(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT)
+        return self.settings.value(self.key(defines.WOW_FOLDER_KEY), defines.WOW_FOLDER_DEFAULT)
 
     def setWowFolder(self, newfolder):
-        return self.settings.setValue(defines.WOW_FOLDER_KEY, newfolder)
+        return self.settings.setValue(self.key(defines.WOW_FOLDER_KEY), newfolder)
 
     def getTocVersion(self):
-        return self.settings.value(defines.WOW_TOC_KEY,70200)
-    
+        return self.settings.value(self.key(defines.WOW_TOC_KEY),"")
+
     def setTocVersion(self,newtoc):
-        return self.settings.setValue(defines.WOW_TOC_KEY,int(newtoc))
-    
+        return self.settings.setValue(self.key(defines.WOW_TOC_KEY),int(newtoc))
+
     def accept(self):
         self.setWowFolder(self.wowInstallFolder.text())
         self.setMaxThreads(self.maxthreads.value())
         self.setTocVersion(self.currenttoc.text())
         super(PreferencesDlg, self).accept()
+
+    def key(self,value):
+        return self.prefix +'/'+ value
+

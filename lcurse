@@ -4,14 +4,18 @@
 import sys
 import signal
 import os
+import shutil
 
 from PyQt5 import Qt
+import string
 
 rootDir = os.path.dirname(os.path.realpath(__file__))
 modulesDir = "{}/modules".format(rootDir)
 appTranslationFile = "{}/translations/{}.qm".format(rootDir, Qt.QLocale.system().name())
 
 sys.path.insert(0, modulesDir)
+mainWidget =False
+
 
 from modules import defines
 
@@ -36,6 +40,26 @@ def loadTranslators():
 if __name__ == "__main__":
     Qt.QCoreApplication.setApplicationName("lcurse")
     Qt.QCoreApplication.setOrganizationName("AlarOfRunetotem")
+    settings = Qt.QSettings()
+    settings.setValue("Retail/path","/retail")
+    if settings.value("Preferences/wowfolder"):
+        settings.setValue(defines.LCURSE_MAXTHREADS_KEY,settings.value('Preferences/maxthreads',50,int))
+        settings.setValue(defines.WOW_VERSION_KEY,"Retail")
+        settings.remove("Classic/group")
+        settings.setValue("Retail/path","/retail")
+        settings.setValue('Retail/' + defines.WOW_TOC_KEY,settings.value('Preferences/CurrentToc',defines.TOC,str))
+        settings.setValue('Retail/' + defines.WOW_FOLDER_KEY,settings.value('Preferences/wowfolder',defines.WOW_FOLDER_DEFAULT + '/_retail_',str))
+        settings.beginGroup("Classic")
+        settings.setValue("path","/classic")
+        settings.setValue(defines.WOW_TOC_KEY,defines.TOC_CLASSIC)
+        settings.setValue(defines.WOW_FOLDER_KEY,defines.WOW_FOLDER_DEFAULT + '/_classic_')
+        settings.endGroup()
+        settings.remove("Preferences")
+        settings.remove("maxthreads")
+    print("Groups",settings.childGroups())
+    for key in settings.allKeys():
+        print("KEY: {}:{}".format(key,settings.value(key)))
+
     app = Qt.QApplication(sys.argv)
     loadTranslators()
 

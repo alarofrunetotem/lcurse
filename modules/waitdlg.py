@@ -5,6 +5,7 @@ from urllib.request import build_opener, HTTPCookieProcessor, HTTPError, HTTPRed
 from http import cookiejar
 import zipfile
 from modules import defines
+from modules import application
 import os
 import re
 import time
@@ -35,7 +36,7 @@ class CacheDecorator(object):
     def __init__(self,fun):
         self.fun=fun
 
-    def __call__(self, url):
+    def __call__(self, url,decode=False):
         md5 = hashlib.md5()
         md5.update(bytes(url,'utf8'))
         hash=md5.hexdigest()
@@ -44,25 +45,28 @@ class CacheDecorator(object):
         except:
             response = self.fun(url)
             f = open(self.cachePrefix +  hash, "w")
-            f.write(str(response.read()))
+            if decode:
+                f.write(str(response.read().decode("utf8")))
+            else:
+                f.write(response.read())
             f.close()
             return response
 
     def ReadFromCache(self, hash):
-        return CachedResponse(open(self.cachePrefix + hash,'r').read())
+        return CachedResponse(open(self.cachePrefix + hash,'r'))
 
 # Enable CacheDecorator in order to cache html pages retrieved from curse
 # WARNING only for html parsing, disable when you are testing downloading zips
 # @CacheDecorator
-def OpenWithRetry(url):
+def OpenWithRetry(url,decode=False):
     count = 0
     maxcount = 5
-    print("URL: {}".format(url))
     # Retry 5 times
     while count < maxcount:
         try:
             response = opener.open(urllib.parse.urlparse(urllib.parse.quote(url, ':/?=')).geturl())
-            print(response)
+            if decode:
+                response=response.read().decode("utf8")
             return response
 
         except Exception as e:
@@ -161,9 +165,10 @@ class CheckDlg(Qt.QDialog):
 
 class CheckWorker(Qt.QThread):
     checkFinished = Qt.pyqtSignal(Qt.QVariant, bool, Qt.QVariant)
-
     def __init__(self, addon):
         super(CheckWorker, self).__init__()
+        global mainWidget
+        self.wowVersion=mainWidget.getAddonVersion()
         self.addon = addon
 
     def needsUpdateGit(self):
@@ -185,22 +190,27 @@ class CheckWorker(Qt.QThread):
         try:
             pattern = re.compile("-nolib$")
             url = self.addon[2] + '/files'
-            response = OpenWithRetry(url)
-            html = response.read()
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(OpenWithRetry(url,True), "lxml")
             beta=self.addon[4]
             tb = soup.find("table","project-file-listing")
             lis = tb.findAll("tr")
             if lis:
-                versionIdx = 1
+                i = 1
+                l=len(lis)
                 isOk=False
                 while True:
-                    versione = lis[versionIdx].td.div.span.string
-                    isOk= beta or versione=="R"
+                    tds=lis[i].findAll("td")
+                    release= tds[0].div.span.string.strip()
+                    wowversion=tds[4].div.div.string.strip()
+                    isOk= beta or release=="R"
+                    if (wowversion != self.wowVersion):
+                        isOk=False
                     if isOk:
                         break
-                    versionIdx=versionIdx+1
-                row=lis[versionIdx]
+                    i=i+1
+                    if i >=l:
+                        raise RuntimeError('Current release not available')
+                row=lis[i]
                 elem = row.find("a",attrs={"data-action":"file-link"})
                 version = elem.string
                 if str(self.addon[3]) != version:
@@ -301,7 +311,11 @@ class UpdateWorker(Qt.QThread):
             settings = Qt.QSettings()
             response = OpenWithRetry(self.addon[5][1])
             filename = "{}/{}".format(tempfile.gettempdir(), self.addon[5][1].split('/')[-2])
-            dest = "{}/Interface/AddOns/".format(settings.value(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT))
+            global mainWidget
+            path=mainWidget.get(defines.WOW_FOLDER_KEY,'unconfigured')
+            if (path=="unconfigured"):
+                raise RuntimeError('Path not defined when unzipping files')
+            dest = "{}/Interface/AddOns/".format(path)
             with open(filename, 'wb') as zipped:
                 zipped.write(response.read())
             with zipfile.ZipFile(filename, "r") as z:
@@ -312,7 +326,7 @@ class UpdateWorker(Qt.QThread):
                     t=r2.split(nome)
                     if len(t) == 2:
                         break
-                toc="{}/Interface/AddOns/{}".format(settings.value(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT),nome)
+                toc="{}/Interface/AddOns/{}".format(path,nome)
                 z.extractall(dest)
 #            os.remove(filename)
             return True,toc
@@ -373,6 +387,12 @@ class UpdateCatalogWorker(Qt.QThread):
     retrievedLastpage = Qt.pyqtSignal(int)
     progress = Qt.pyqtSignal(int)
 
+    def freeResources(self):
+        return self.sem.available()
+
+    def busyResources(self):
+        return self.maxThreads - self.sem.available()
+
     def __init__(self):
         super(UpdateCatalogWorker, self).__init__()
         settings = Qt.QSettings()
@@ -380,11 +400,10 @@ class UpdateCatalogWorker(Qt.QThread):
         self.addonsMutex = Qt.QMutex()
         self.maxThreads = int(settings.value(defines.LCURSE_MAXTHREADS_KEY, defines.LCURSE_MAXTHREADS_DEFAULT))
         self.sem = Qt.QSemaphore(self.maxThreads)
-        self.lastpage = 1
 
     def retrievePartialListOfAddons(self, page):
-        response = OpenWithRetry("http://www.curseforge.com/wow/addons?page={}".format(page))
-        soup = BeautifulSoup(response.read(), "lxml")
+        url="{}/addons?page={}".format(defines.CURSE_URL,page)
+        soup = BeautifulSoup(OpenWithRetry(url,True), "lxml")
         # Curse returns a soft-500
         if soup.find_all("h2", string="Error"):
             print("Server-side error while getting addon list.")
@@ -411,6 +430,7 @@ class UpdateCatalogWorker(Qt.QThread):
         self.addonsMutex.unlock()
 
         self.sem.release()
+        print("Releasing {}. {} resources free /  {} resources busy".format(url,self.freeResources(),self.busyResources()))
 
         return lastpage
 
@@ -431,6 +451,10 @@ class UpdateCatalogWorker(Qt.QThread):
         self.retrieveListOfAddons()
 
         # wait until all worker are done
-        self.sem.acquire(self.maxThreads)
-
+        watchdog=10
+        while self.sem.available() < self.maxThreads:
+            time.sleep(1)
+            watchdog-=1
+            if not watchdog:
+                break
         self.updateCatalogFinished.emit(self.addons)

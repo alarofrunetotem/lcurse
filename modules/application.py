@@ -5,6 +5,7 @@ import sys
 import json
 import os
 import re
+import shutil
 from shutil import rmtree
 import urllib
 from urllib.parse import urlparse, quote as urlquote
@@ -15,6 +16,8 @@ from bs4 import BeautifulSoup
 from PyQt5 import Qt
 
 from modules import preferences
+from modules import chooser
+from modules import about
 from modules import addaddondlg
 from modules import waitdlg
 from modules import defines
@@ -29,51 +32,110 @@ class Grid(Qt.QTableWidget):
     def __init__(self, parent=None):
         self.parent = parent
         super().__init__(parent.mainWidget)
-    
+
     def contextMenuEvent(self,event):
         self.menu = Qt.QMenu(self)
         row=self.currentRow()
         name=self.item(row,0).text()
-        self.menu.addAction(self.tr("Context menu for {}").format(name))
+        self.menu.addAction(self.tr("{}").format(name))
         removefromlistAction = Qt.QAction(self.tr("Remove from list"),self)
         removefromlistAction.setStatusTip(self.tr("Leave all files unaltered, useful for subaddons"))
         removefromlistAction.triggered.connect(self.removeFromList)
         self.menu.addAction(removefromlistAction)
         actionUpdate = Qt.QAction(self.tr("Update addon"), self)
-        actionUpdate.setStatusTip(self.tr("Update currently selected addons if needed"))
-        actionUpdate.triggered.connect(self.parent.updateAddon)        
+        actionUpdate.setStatusTip(self.tr("Update currently selected addon if needed"))
+        actionUpdate.triggered.connect(self.parent.updateAddon)
         self.menu.addAction(actionUpdate)
         actionForceUpdate = Qt.QAction(self.tr("Force Update addon"), self)
-        actionForceUpdate.setStatusTip(self.tr("Unconditionally update currently selected addons"))
-        actionForceUpdate.triggered.connect(self.parent.forceUpdateAddon)        
+        actionForceUpdate.setStatusTip(self.tr("Unconditionally update currently selected addon"))
+        actionForceUpdate.triggered.connect(self.parent.forceUpdateAddon)
         self.menu.addAction(actionForceUpdate)
+        self.menu.addSeparator()
+        actionRemove = Qt.QAction(self.tr("Delete addon"), self)
+        actionRemove.setStatusTip(self.tr("Completely remove selected addon"))
+        actionRemove.triggered.connect(self.parent.removeAddon)
+        self.menu.addAction(actionRemove)
         self.menu.popup(Qt.QCursor.pos())
 
     def removeFromList(self):
         row = self.currentRow()
         self.removeRow(row)
         self.parent.saveAddons()
-        
-        
+
+
 
 class MainWidget(Qt.QMainWindow):
     def __init__(self):
         super(MainWidget, self).__init__()
-        self.ensureLCurseFolder()
-        self.addonsFile = os.path.expanduser(defines.LCURSE_ADDONS)
-        defines.TOC=self.getWowToc()
+        waitdlg.mainWidget=self
+        self.loadCurrentVersions()
+        self.settings=Qt.QSettings()
         self.addWidgets()
+        self.load()
+
+    def loadCurrentVersions(self):
+        soup = BeautifulSoup(waitdlg.OpenWithRetry(defines.CURSE_URL + '/addons',True), "lxml")
+        versions = soup.select("#filter-game-version option")
+        classic=False
+        retail=False
+        version=''
+        self.classicVersion=""
+        self.retailVersion=""
+        self.classicFilter=""
+        self.retailFilter=""
+        for v in versions:
+            value=v.get("value").strip()
+            text=v.text.strip()
+            if classic:
+                self.classicVersion=text
+                self.classicFilter=value
+            if retail:
+                self.retailVersion=text
+                self.retailFilter=value
+                retail=False
+            if text == 'WoW':
+                retail=True
+            if text == 'WoW Classic':
+                classic=True
+        print("Found versions Classic", self.classicVersion ," Retail",self.retailVersion)
+
+    def getAddonVersion(self):
+        if (self.getWowVersion()== "Classic"):
+            return self.classicVersion
+        else:
+            return self.retailVersion
+
+    def getWowVersion(self):
+        return self.settings.value(defines.WOW_VERSION_KEY)
+
+    def load(self):
+        version=defines.ApplyWowVersion()
+        if not os.path.isdir(defines.LCURSE_PREFIX):
+            os.mkdir(defines.LCURSE_PREFIX)
+            if version == "Retail":
+                for file in ['/addons.json','/addon-catalog.json','/tocs.json']:
+                    shutil.copy2(defines.LCURSE_FOLDER + file, defines.LCURSE_PREFIX + file)
+        self.ensureLCurseFolder()
+        self.addonsFile = defines.LCURSE_ADDONS
+        defines.TOC=self.getWowToc()
 
         self.addons = []
         self.loadAddons()
 
         self.availableAddons = []
         self.loadAddonCatalog()
-            
+        self.setWindowTitle('WoW!Curse ' + about.VERSION  + ' for ' + self.getWowVersion() + ' (TOC: ' + defines.TOC +')')
+
+    def get(self,key,default):
+        self.settings.beginGroup(self.getWowVersion())
+        value=self.settings.value(key,default)
+        self.settings.endGroup()
+        return value
+
     def getWowToc(self):
-        settings = Qt.QSettings()
+        path=self.get(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT)
         try:
-            buildinfo="{}/.build.info".format(settings.value(defines.WOW_FOLDER_KEY, defines.WOW_FOLDER_DEFAULT))
+            buildinfo="{}/.build.info".format(path)
             print(buildinfo)
             with open(buildinfo, encoding="utf8", errors='replace') as f:
                 line = f.readline()
@@ -82,9 +144,9 @@ class MainWidget(Qt.QMainWindow):
             v=version.split('.')
             return str(int(v[0])*10000 + int(v[1])*100)
         except Exception as e:
-            return settings.value(defines.WOW_TOC_KEY,defines.TOC)
             print("Error messages",e)
-                
+            return self.get(defines.WOW_TOC_KEY,defines.TOC if self.getWowVersion()=='Retail' else defines.TOC_CLASSIC)
+
     def addWidgets(self):
         self.mainWidget = Qt.QWidget(self)
         box = Qt.QVBoxLayout(self.mainWidget)
@@ -110,6 +172,17 @@ class MainWidget(Qt.QMainWindow):
         actionPrefs.setStatusTip(self.tr("Change preferences like wow install folder"))
         actionPrefs.triggered.connect(self.openPreferences)
 
+        actionChoose = Qt.QAction(self.tr("Change WoW Version"), self)
+        actionChoose.setShortcut("Ctrl+V")
+        actionChoose.setStatusTip(self.tr("Switches between classic and retail"))
+        actionChoose.triggered.connect(self.openChooser)
+
+        actionAbout = Qt.QAction(self.tr("About"), self)
+        actionAbout.setShortcut("Ctrl+I")
+        actionAbout.setStatusTip(self.tr("Application version"))
+        actionAbout.triggered.connect(self.openAbout)
+
+
         actionExit = Qt.QAction(self.tr("Exit"), self)
         actionExit.setShortcuts(Qt.QKeySequence.Quit)
         actionExit.setStatusTip(self.tr("Exit application"))
@@ -120,9 +193,11 @@ class MainWidget(Qt.QMainWindow):
         menuFile.addAction(actionSave)
         menuFile.addAction(actionImport)
         menuFile.addSeparator()
+        menuFile.addAction(actionChoose)
         menuFile.addAction(actionPrefs)
         menuFile.addSeparator()
         menuFile.addAction(actionExit)
+        menuFile.addAction(actionAbout)
         self.addAction(actionLoad)
         self.addAction(actionSave)
         self.addAction(actionPrefs)
@@ -187,6 +262,7 @@ class MainWidget(Qt.QMainWindow):
         menuCatalog.addAction(actionCatalogUpdate)
         toolbar = self.addToolBar(self.tr("Catalog"))
         toolbar.addAction(actionCatalogUpdate)
+        toolbar.addAction(actionChoose)
 
         self.addonList = Grid(self)
 
@@ -197,7 +273,6 @@ class MainWidget(Qt.QMainWindow):
         screen = Qt.QDesktopWidget().screenGeometry()
         size = self.geometry()
         self.move((screen.width() - size.width()) / 2, (screen.height() - size.height()) / 5)
-        self.setWindowTitle('WoW!Curse 2.0 ' + '(TOC: ' + defines.TOC +')')
 
         box.addWidget(self.addonList)
         self.statusBar().showMessage(self.tr("Ready"))
@@ -207,16 +282,19 @@ class MainWidget(Qt.QMainWindow):
     #    def resizeEvent(self, event):
     #        print(self.geometry())
 
+    def die(self,message,title="Fatal error"):
+            Qt.QMessageBox.critical(None, title, message)
+            print(message)
+            sys.exit()
+
     def ensureLCurseFolder(self):
         if not os.path.exists(defines.LCURSE_FOLDER):
             os.mkdir(defines.LCURSE_FOLDER)
         elif not os.path.isdir(defines.LCURSE_FOLDER):
-            e = self.tr(
+            self.die(self.tr(
                 "There is an entry \".lcurse\" in your home directory which is neither a folder nor a link to a folder."
-                " Exiting!")
-            Qt.QMessageBox.critical(None, self.tr("lcurse-folder not a folder"), e)
-            print(e)
-            raise
+                " Exiting!",
+                "lcurse folder is not a folder"))
 
     def sizeHint(self):
         width = self.addonList.sizeHintForColumn(0) + self.addonList.sizeHintForColumn(
@@ -291,11 +369,11 @@ class MainWidget(Qt.QMainWindow):
                 print("not enough informations found for addon  {}\n(version={},name={},toc={})\n".format(toc,version,name,tocversion))
         name = self.removeStupidStuff(name)
         curseId = self.removeStupidStuff(curseId)
-        
+
         uri = "http://www.curseforge.com/wow/addons/{}".format(name.lower().replace(" ", "-"))
         if curseId:
             uri = "http://www.curseforge.com/wow/addons/{}".format(curseId)
-        
+
             #return ["", "", "", ""]
 
         return [name, uri, version, tocversion]
@@ -321,8 +399,22 @@ class MainWidget(Qt.QMainWindow):
         self.saveAddons()
 
     def openPreferences(self):
-        pref = preferences.PreferencesDlg(self)
-        pref.exec_()
+        dlg = preferences.PreferencesDlg(self)
+        dlg.exec_()
+
+    def openChooser(self):
+        old = self.getWowVersion()
+        dlg = chooser.ChooserDlg(self)
+        result = dlg.exec_()
+        if result != Qt.QDialog.Accepted:
+            return
+        print(dlg.current,old,self.getWowVersion())
+        if (old != self.getWowVersion()):
+            self.load()
+
+    def openAbout(self):
+        dlg = about.AboutDlg(self)
+        dlg.exec_()
 
     def insertAddon(self, row, name, uri, version, tocVersion, allowBeta):
         self.addonList.setItem(row, 0, Qt.QTableWidgetItem(name))
@@ -350,7 +442,7 @@ class MainWidget(Qt.QMainWindow):
                 except:
                     print("Warning, old database, will convert")
                     dbversion = 0
-                    addons = data 
+                    addons = data
         if not addons:
             return
         self.addonList.setRowCount(len(addons))
@@ -367,7 +459,7 @@ class MainWidget(Qt.QMainWindow):
                 if addon["toc"] == "":
                     addon["toc"] = "n/a"
                 self.addonList.setItem(row, 3, Qt.QTableWidgetItem(addon["toc"]))
-                
+
             except Exception as e:
                 addon["toc"] = "n/a"
             if addon["toc"] == "n/a":
@@ -376,19 +468,19 @@ class MainWidget(Qt.QMainWindow):
                 except Exception as e:
                     self.addonList.setItem(row, 3, Qt.QTableWidgetItem("n/a"))
             toc=self.addonList.item(row, 3).text()
-            if (toc=="n/a"): 
+            if (toc=="n/a"):
                 self.addonList.item(row, 3).setForeground(Qt.Qt.black)
             elif ( toc == defines.TOC):
                 self.addonList.item(row, 3).setForeground(Qt.Qt.blue)
             else:
-                self.addonList.item(row, 3).setForeground(Qt.Qt.red)                    
+                self.addonList.item(row, 3).setForeground(Qt.Qt.red)
             allowBeta = addon.get("allowbeta", False)
             allowBetaItem = Qt.QTableWidgetItem()
             allowBetaItem.setCheckState(Qt.Qt.Checked if allowBeta else Qt.Qt.Unchecked)
             self.addonList.setItem(row, 4, allowBetaItem)
         self.addonList.resizeColumnsToContents()
         self.adjustSize()
-        
+
     def saveAddons(self):
         print("Saving addons to ",self.addonsFile)
         addons = []
@@ -422,7 +514,7 @@ class MainWidget(Qt.QMainWindow):
         except IndexError:
             print("can't handle: " + name)
             name = ""
-        
+
         if url == None:
             url = str(nameOrUrl)
             if "curseforge.com" in url:
@@ -598,7 +690,8 @@ class MainWidget(Qt.QMainWindow):
 
     def forceUpdateAddon(self):
         row = self.addonList.currentRow()
-        self.addonList.item(row, 2).setText("")
+        print(str(self.addonList.item(row, 2)))
+        self.addonList.item(row, 2).setText("__Forced Update__")
         self.updateAddon()
 
     def updateAddon(self):
